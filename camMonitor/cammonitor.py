@@ -1,7 +1,7 @@
 import cv2
 import subprocess as sp
 import logging
-
+import time
 
 
 class CamMonitor():
@@ -32,21 +32,24 @@ class CamMonitor():
             self.rtmpUrl]
         self.pushrtmpProcess = sp.Popen(self.command, stdin=sp.PIPE)  # ,shell=False
         self.open_switch=False
-        self.background_image=None
+        # self.background_image=None
+        self.former_frame=None
         self.motion_detect_on=False
     def run(self):
         self.open_switch = True
         # count = 0
+        time.sleep(1)
         while self.open_switch:
             ###########################图片采集
             # count = count + 1
             ret, frame = self.camera.read()  # 逐帧采集视频流
-            if self.background_image is None:
+            if self.former_frame is None:
                 # 背景图，或者说第一帧的图片进行亮度减小，高斯模糊等处理，减少光照振动等因素的影响
                 # 背景图的作用是与后面的图片进行对比
                 logging.info('background image')
-                self.background_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                self.background_image = cv2.GaussianBlur(self.background_image, (21, 21), 0)
+                self.former_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                self.former_frame = cv2.GaussianBlur(self.former_frame, (21, 21), 0)
+                continue
             if not ret:
                 break
             if self.motion_detect_on:
@@ -68,15 +71,14 @@ class CamMonitor():
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         # 高斯平滑 模糊处理 减小光照 震动等原因产生的噪声影响
         gray_frame = cv2.GaussianBlur(gray_frame, (21, 21), 0)
-
         # 检测背景和帧的区别
-        diff = cv2.absdiff(self.background_image, gray_frame)
+        diff = cv2.absdiff(self.former_frame, gray_frame)
         # 将区别转为二值
         diff = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)[1]
         # 定义结构元素
-        es = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 4))
+        # es = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 4))
         # 膨胀运算
-        diff = cv2.dilate(diff, es, iterations=2)
+        diff = cv2.dilate(diff, None, iterations=2)
         # 搜索轮廓
         cnts, hierarcchy = cv2.findContours(diff.copy(),
                                             cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -105,12 +107,17 @@ class CamMonitor():
         """
         for c in cnts:
             # 轮廓太小忽略 有可能是斑点噪声
-            if cv2.contourArea(c) < 1500:
+            if cv2.contourArea(c) < 10000:
                 continue
             # 将轮廓画出来
             (x, y, w, h) = cv2.boundingRect(c)
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        # 记录这一帧作为下次的对比对象
+        self.former_frame=gray_frame
         return frame
         # cv2.imshow("contours", frame)
         # cv2.imshow("diff", diff)
 
+if __name__=='__main__':
+    cam=CamMonitor()
+    cam.run()
